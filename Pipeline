@@ -1,0 +1,60 @@
+Quality filtering
+Trimmomatic
+trimmomatic-0.32.jar PE -threads 60 -phred33 <input fastq files> <output fastq files> LEADING:20 TRAILING:20 SLIDINGWINDOW:4:25 MINLEN:100
+
+Genome assembly
+Velvet
+VelvetOptimiser.pl -s 101 -e 149 -x 2 -t 10 -d full_qc_k101-149 -f '-shortPaired -fastq.gz <input fastq files> -o '-min_contig_lgth 500 -ins_length 400 -ins_length_sd 13'
+
+MIRA
+job = genome,denovo,accurate
+parameters =    
+-GENERAL:number_of_threads=30 COMMON_SETTINGS -NAG_AND_WARN:check_maxreadnamelength=warn:check_average_coverage=warn -HASHSTATISTICS:lossless_digital_normalisation=yes
+readgroup = sub1
+technology = solexa
+template_size = 450 550 autorefine
+segment_placement = ---> <---
+data = <input fastq files>
+
+SPAdes
+spades.py --only-assembler --pe1-1 <input fastq files> --pe1-2 <input fastq files> --pe1-fr -t 10 --careful -o out
+
+Scaffolding
+Minimus2
+toAmos -s file.fas  -o file.afg
+minimus2 -D OVERLAP=50 -D CONSERR=0.05 file
+cat file.fasta file.singletons.seq > file.minimus2.fasta
+ 
+SSPACE
+SSPACE_Standard_v3.0.pl -l library.txt -s file.minimus2.fasta -x 1 -T 30 -v 1 -b file
+
+
+Correction/Evaluation
+
+REAPR
+reapr smaltmap -n 20 file.minimus2.SSPACE.fasta <fastq files> file.minimus2.SSPACE.mapped.bam
+reapr perfectmap file.minimus2.SSPACE.fasta <fastq files> 400 perfect 
+reapr pipeline -break b=1 -break l=500 file.minimus2.SSPACE.fasta file.minimus2.SSPACE.mapped.bam perfect
+
+Quast
+quast.py -f -M 500 -R NC_022592.fna –G NC_022592.gene.gff --gage -T 12 -S 300,1000,1500 -t 500,1000,1500  <fasta files> -o out
+
+OrthoMCL
+orthomclAdjustFasta Cace824 Clostridium_acetobutylicum_ATCC_824_uid57677.faa 2
+orthomclAdjustFasta Cklu555 Clostridium_kluyveri_DSM_555_uid58885.faa 2
+orthomclAdjustFasta Clju13528 NC_014328.faa 2
+orthomclAdjustFasta Cauto10061 NC_022592.faa 2
+ 
+orthomclFilterFasta compliantFasta/ 10 20
+makeblastdb -in goodProteins.fasta -dbtype prot -title Clostr -out Clostr
+blastp -query goodProteins.fasta -db Clostr -out blastp.all2all.wd2.out -outfmt 6 -word_size 2 -num_threads 12
+orthomclBlastParser blastp.all2all.wd2.out compliantFasta/ >> similarSequences.txt
+run_orthomcl.sh orthomclSoftware-v2.0.9 orthomcl.config.eval-5percent30
+run_orthomcl.sh orthomclSoftware-v2.0.9 orthomcl.config.eval-5percent50
+run_orthomcl.sh orthomclSoftware-v2.0.9 orthomcl.config.eval-5percent60 
+
+OrthoMCL based validation (https://github.com/suryasaha/OrthoMCL) 
+cat proteomes/*.faa > allproteins.faa
+cat proteomes/*.faa | grep '^>' > names.txt
+orthomcl.ValidateGroups.pl -s groups.txt.eval-5percent50 -c groups.txt.eval-5percent60 -r groups.txt.eval-5percent30 -m map.txt -n names.txt
+orthomcl.Proteome2sets.pl -s Validated_clusters_common.txt -c groups.txt.eval-5percent60 -r groups.txt.eval-5percent30 -f allproteins.faa -m map.txt  -d Proteome2sets.out.xls 2>err
